@@ -1,0 +1,10 @@
+# Build outputs
+build/
+build-qnx-*/
+upstream/
+.qnx-vm/
+
+# Editor / OS
+.DS_Store
+*.swp
+compile_commands.json
