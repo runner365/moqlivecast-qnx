@@ -52,6 +52,11 @@
    → 出现 `ELF 64-bit ... x86-64` 即通过
 5. 通过后：用 `-c` 只编译不链接，探 libuv / OpenSSL / yaml-cpp 的依赖边界
 
+## 赛事材料
+
+Devpost 的全部字段、Project Story 草稿、Gallery 计划、视频脚本都记在
+[`docs/devpost-submission.md`](docs/devpost-submission.md)，后续讨论直接改那个文件。
+
 ## 尚未验证（风险）
 
 - libuv 1.51+ 的 QNX 8 支持在目标上的实际行为（上游 PR #4801 已合并，但没在 QNX 8.0.2 上验过）
