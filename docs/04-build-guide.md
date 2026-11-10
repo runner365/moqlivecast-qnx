@@ -39,11 +39,9 @@ cd moqlivecast-qnx
 
 ### 一键构建（推荐）
 
-上面四步（依赖 / OpenSSL / 配置 / 编译）已经脚本化：
-
 ```bash
 source ~/qnx800/qnxsdp-env.sh
-./scripts/build.sh x86_64 moq_transport_client flv2moqtransport_client
+./scripts/build.sh x86_64 flv2moqtransport_client
 ```
 
 脚本做的事：
@@ -51,8 +49,14 @@ source ~/qnx800/qnxsdp-env.sh
 | 脚本 | 内容 |
 |---|---|
 | `scripts/fetch-deps.sh` | 把 vendored libuv 换成 ≥1.52（写死版本号，可复现） |
-| `scripts/build-openssl.sh` | qcc-nodep 包装 + Configure 参数 + `make build_libs` + 安装到构建目录 |
-| `scripts/build.sh` | 串起三步 + CMake 配置（含 `-D_QNX_SOURCE`）+ 多目标构建 |
+| `scripts/build.sh` | CMake 配置（含 `-D_QNX_SOURCE`）+ 多目标构建 |
+
+**OpenSSL 的交叉编译不用手动做**：`patches/0002-qnx-openssl-build.patch` 修改了上游
+`CMakeLists.txt`，让 `openssl_ext` 目标在 QNX 下用 `qcc` 编译（传 `CC`/`AR`/`RANLIB`，
+加 `no-tests no-asm no-async no-afalgeng`，用 `make build_libs` 跳过 apps）。
+`cmake --build` 会自动驱动它。
+
+`scripts/build-openssl.sh` 仅作为手动排查工具保留（当 CMake 那一步出问题时，可以单独跑它定位）。
 
 下面是每一步的原理说明，脚本出问题时对照阅读。
 
