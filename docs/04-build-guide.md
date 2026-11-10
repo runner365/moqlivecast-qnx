@@ -37,6 +37,25 @@ cd moqlivecast-qnx
 
 结果：上游源码在 `upstream/`（已在 `.gitignore` 中）。
 
+### 一键构建（推荐）
+
+上面四步（依赖 / OpenSSL / 配置 / 编译）已经脚本化：
+
+```bash
+source ~/qnx800/qnxsdp-env.sh
+./scripts/build.sh x86_64 moq_transport_client flv2moqtransport_client
+```
+
+脚本做的事：
+
+| 脚本 | 内容 |
+|---|---|
+| `scripts/fetch-deps.sh` | 把 vendored libuv 换成 ≥1.52（写死版本号，可复现） |
+| `scripts/build-openssl.sh` | qcc-nodep 包装 + Configure 参数 + `make build_libs` + 安装到构建目录 |
+| `scripts/build.sh` | 串起三步 + CMake 配置（含 `-D_QNX_SOURCE`）+ 多目标构建 |
+
+下面是每一步的原理说明，脚本出问题时对照阅读。
+
 ---
 
 ## 2. 依赖一：libuv（必须 ≥ 1.52）

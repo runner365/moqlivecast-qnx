@@ -1,0 +1,17 @@
+#!/bin/bash
+# qcc 的包装脚本：过滤掉 qcc 不认识的依赖生成参数。
+#
+# 原因：qcc 的选项解析层会把 -MF 后面的文件名当成第二个输入文件，报
+#   cc: Can't specify -P, -C, -E, -c or -S with -o and have multiple files
+# OpenSSL 的 Makefile 每行编译都带 -MMD -MF，所以必须过滤。
+args=()
+skip=0
+for a in "$@"; do
+  if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+  case "$a" in
+    -MMD|-MD|-MP) continue ;;
+    -MF|-MT|-MQ)  skip=1; continue ;;
+  esac
+  args+=("$a")
+done
+exec qcc "${args[@]}"
