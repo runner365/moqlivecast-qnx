@@ -11,6 +11,7 @@
 |---|---|---|
 | 补全 POSIX 头文件（`int64_t` / `sockaddr_in6`） | [`ba473628`](https://github.com/runner365/moqlivecast/commit/ba473628858d) | `logger/logger.c`、`moq_transport_client/include/moq_transport_client.h` |
 | 用 qcc 交叉编译 OpenSSL（QNX 分支） | [`32cc9383`](https://github.com/runner365/moqlivecast/commit/32cc93834c0d) | `CMakeLists.txt` |
+| 安装完整 OpenSSL 头文件树（`e_ostime.h` 缺失） | [`bfd98970`](https://github.com/runner365/moqlivecast/commit/bfd9897071d1) | `CMakeLists.txt` |
 
 `scripts/bootstrap.sh` 检出**固定 commit**（见脚本里的 `UPSTREAM_REF`），保证可复现。
 
