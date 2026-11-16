@@ -31,11 +31,25 @@ if [ ${#patches[@]} -eq 0 ]; then
   exit 0
 fi
 
-echo "==> applying ${#patches[@]} patch(es)"
+echo "==> applying ${#patches[@]} patch(es) (idempotent)"
 git -C "$UP_DIR" checkout --quiet -- .
+applied=0
+skipped=0
 for p in "${patches[@]}"; do
-  echo "    $(basename "$p")"
-  git -C "$UP_DIR" apply --index --whitespace=fix "$p"
+  name=$(basename "$p")
+  # 已经合入上游的补丁：反向应用可以成功 => 内容已存在，跳过
+  if git -C "$UP_DIR" apply --reverse --check "$p" >/dev/null 2>&1; then
+    echo "    $name  (已在源码中，跳过)"
+    skipped=$((skipped + 1))
+    continue
+  fi
+  if git -C "$UP_DIR" apply --index --whitespace=fix "$p"; then
+    echo "    $name  (已应用)"
+    applied=$((applied + 1))
+  else
+    echo "错误：$name 无法应用，可能上游已改动相关代码" >&2
+    exit 1
+  fi
 done
 
-echo "==> done: $UP_DIR @ $(git -C "$UP_DIR" rev-parse --short HEAD) +${#patches[@]} patches"
+echo "==> done: $UP_DIR @ $(git -C "$UP_DIR" rev-parse --short HEAD) applied=$applied skipped=$skipped"
