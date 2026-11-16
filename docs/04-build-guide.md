@@ -51,9 +51,10 @@ source ~/qnx800/qnxsdp-env.sh
 | `scripts/fetch-deps.sh` | 把 vendored libuv 换成 ≥1.52（写死版本号，可复现） |
 | `scripts/build.sh` | CMake 配置（含 `-D_QNX_SOURCE`）+ 多目标构建 |
 
-**OpenSSL 的交叉编译不用手动做**：`patches/0002-qnx-openssl-build.patch` 修改了上游
-`CMakeLists.txt`，让 `openssl_ext` 目标在 QNX 下用 `qcc` 编译（传 `CC`/`AR`/`RANLIB`，
-加 `no-tests no-asm no-async no-afalgeng`，用 `make build_libs` 跳过 apps）。
+**OpenSSL 的交叉编译不用手动做**：上游 `CMakeLists.txt` 已经包含 QNX 分支
+（commit [`32cc9383`](https://github.com/runner365/moqlivecast/commit/32cc93834c0d)），
+`openssl_ext` 目标在 QNX 下会用 `qcc` 编译（传 `CC`/`AR`/`RANLIB`，加
+`no-tests no-asm no-async no-afalgeng`，用 `make build_libs` 跳过 apps）。
 `cmake --build` 会自动驱动它。
 
 `scripts/build-openssl.sh` 仅作为手动排查工具保留（当 CMake 那一步出问题时，可以单独跑它定位）。

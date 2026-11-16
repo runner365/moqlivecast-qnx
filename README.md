@@ -8,7 +8,7 @@ MoQ Transport (`draft-ietf-moq-transport-22`).
 control loop next to it* — the part Linux can only approximate and QNX can prove.
 
 This repository is **not** a fork. It contains the porting layer, the QNX build
-files, the patches applied on top of a pinned upstream commit, and the evidence.
+files, and the evidence. Source-level QNX support has been merged upstream.
 Upstream source is fetched by URL — see [`scripts/bootstrap.sh`](scripts/bootstrap.sh).
 
 ---
@@ -57,7 +57,7 @@ smallest stable surface, and the one that belongs on a device anyway.
 |---|---|
 | `cmake/toolchain-qnx800-*.cmake` | CMake toolchain files for `qcc` (aarch64 / x86_64) |
 | `port/qnx/` | QNX platform layer: priorities, CPU affinity, monotonic clock, APS hooks |
-| `patches/` | `git format-patch` output applied onto the pinned upstream commit |
+| `patches/` | 上游改动记录（QNX 支持已合入上游，见 `patches/README.md`） |
 | `scripts/` | bootstrap, build, QEMU image, QEMU run, weak-network injection |
 | `apps/qnx-publisher/` | QNX-side publisher demo (test pattern first, camera later) |
 | `docs/` | pitch, porting notes, benchmark methodology + results |
@@ -73,7 +73,7 @@ export QNX_SDP=/opt/qnx800        # directory that contains qnxsdp-env.sh
 
 # 2. toolchain + upstream checkout at the pinned commit
 ./scripts/env.sh
-./scripts/bootstrap.sh            # clones upstream by URL, applies patches/
+./scripts/bootstrap.sh            # clones upstream by URL at a pinned commit
 
 # 3. cross-compile
 ./scripts/build.sh                # -> build-qnx-aarch64/
@@ -101,7 +101,7 @@ Method: see [`docs/03-benchmark.md`](docs/03-benchmark.md).
 
 * upstream: <https://github.com/runner365/moqlivecast>
 * pinned commit: recorded at the top of [`scripts/bootstrap.sh`](scripts/bootstrap.sh)
-* patch stack: [`patches/`](patches/) — regenerated with `git format-patch`
+* 源码级 QNX 支持已合入上游，记录见 [`patches/README.md`](patches/README.md)
 * QNX-only code never lives upstream until it is stable enough for a PR
   (planned: `tools/qnx/` + a `qnx-ports` build recipe).
 
