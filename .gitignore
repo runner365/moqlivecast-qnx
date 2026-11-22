@@ -8,3 +8,6 @@ upstream/
 .DS_Store
 *.swp
 compile_commands.json
+
+# private planning docs
+SCHEDULE.md

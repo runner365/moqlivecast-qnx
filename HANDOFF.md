@@ -104,8 +104,9 @@ curl -o xxx http://10.0.2.2:8000/xxx && chmod +x xxx && ./xxx
 
 ## 赛事材料
 
-Devpost 的全部字段、Project Story 草稿、Gallery 计划、视频脚本都记在
-[`docs/devpost-submission.md`](docs/devpost-submission.md)，后续讨论直接改那个文件。
+Devpost 的全部字段、Project Story 草稿、Gallery 计划、视频脚本都在工作区
+**私有的** `../private/devpost-submission.md`（不在仓库内，避免公开排期和赛道策略）。
+工作笔记同样在 `../private/` 与 `../compile_and_build.md`。
 
 ## 尚未验证（风险）
 
