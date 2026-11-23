@@ -56,11 +56,16 @@ smallest stable surface, and the one that belongs on a device anyway.
 | Path | What it is |
 |---|---|
 | `cmake/toolchain-qnx800-*.cmake` | CMake toolchain files for `qcc` (aarch64 / x86_64) |
-| `port/qnx/` | QNX platform layer: priorities, CPU affinity, monotonic clock, APS hooks |
-| `patches/` | 上游改动记录（QNX 支持已合入上游，见 `patches/README.md`） |
-| `scripts/` | bootstrap, build, QEMU image, QEMU run, weak-network injection |
+| `scripts/` | bootstrap, build, QEMU image/run, weak-network injection |
+| `port/qnx/` | QNX platform layer: priorities, CPU affinity, monotonic clock |
+| `upstream-contrib/` | patches proposed upstream (media-source C API) |
+| `ports/yaml-cpp/` | `qnx-ports` recipe contributed for the QNX ecosystem |
+| `patches/` | record of the source-level changes merged upstream |
+| `docs/01-why-qnx.md` | why QNX is the right foundation |
+| `docs/02-porting-notes.md` | what had to change and why (verified) |
+| `docs/03-build-guide.md` | cross-compilation instructions |
+| `docs/04-test-plan.md` | weak-network measurement method |
 | `apps/qnx-publisher/` | QNX-side publisher demo (test pattern first, camera later) |
-| `docs/` | pitch, porting notes, benchmark methodology + results |
 
 ---
 
@@ -93,7 +98,7 @@ export QNX_SDP=/opt/qnx800        # directory that contains qnxsdp-env.sh
 | 5 % loss, 60 ms RTT, 20 ms jitter | — | — | — | |
 | same, video saturated to 100 % link | — | — | — | the point of the whole project |
 
-Method: see [`docs/03-benchmark.md`](docs/03-benchmark.md).
+Method: see [`docs/04-test-plan.md`](docs/04-test-plan.md).
 
 ---
 

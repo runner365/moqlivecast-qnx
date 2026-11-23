@@ -56,4 +56,4 @@ That last property is what turns "a transport port" into a real-time design.
 > jitter stays under 50 µs on QNX — while the same setup on Linux shows
 > millisecond-scale control jitter.
 
-Numbers, a trace, and a reproducible harness. See `docs/03-benchmark.md`.
+Numbers, a trace, and a reproducible harness. See `docs/04-test-plan.md`.

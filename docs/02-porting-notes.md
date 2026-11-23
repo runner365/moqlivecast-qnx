@@ -1,63 +1,190 @@
-# Porting notes — Linux assumptions vs QNX 8.0
+# Porting notes — QNX 8.0
 
-Living document. Every row is something that has to be checked on target; the
-status column is the truth of the moment, not the plan.
+What actually had to change to make moqlivecast build and run on QNX 8.0, and why.
+Everything below was verified on QNX SDP 8.0.3 with the x86_64 target (QEMU) and
+cross-checked for aarch64.
 
-## Environment
+Source-level changes were merged upstream rather than kept as a patch stack; the
+commit hashes are listed in [`patches/README.md`](../patches/README.md).
 
-* QNX SDP 8.0 has **no macOS host**. Cross-compile from Linux (VM or container).
-* QNX 8.0 always uses **io-sock** (the NetBSD-derived stack). `io-pkt` is gone;
-  code written for QNX 7.1 with `io-pkt` needs the io-sock migration guide.
-* `qcc` is a driver; the target is `-Vgcc_ntoaarch64le` (or `gcc_ntox86_64`).
-  CMake selects it via `CMAKE_<LANG>_COMPILER_TARGET`.
+---
 
-## Known Linux-isms in the upstream tree
+## 1. Summary
 
-| area | upstream assumption | QNX 8.0 reality | status |
-|---|---|---|---|
-| event loop | libuv | libuv 1.51+ has QNX 8 support ([PR #4801](https://github.com/libuv/libuv/pull/4801), 2025-06); **needs a build recipe** | ☐ |
-| I/O readiness | epoll / `EPOLLET` | io-sock provides epoll, but edge-trigger semantics and `EPOLLRDHUP` need verification | ☐ |
-| eventfd / timerfd | Linux-only syscalls | io-sock has eventfd/timerfd; verify or fall back to `pulse` + `MsgReceive` | ☐ |
-| batched send | `sendmmsg` | not available; loop over `sendmsg` or use `sendmsg` with `MSG_NOSIGNAL` | ☐ |
-| UDP GSO / corking | `UDP_SEGMENT`, `TCP_CORK` | absent; pacing must absorb the cost (upstream already has `quic/pacing_send.c`) | ☐ |
-| `SO_REUSEPORT` | used for listener sharding | behaviour differs; single listener + threads is the safe path | ☐ |
-| CPU affinity | `sched_setaffinity` | `ThreadCtl(_NTO_TCTL_RUNMASK…)` — wrapped in `port/qnx/` | ☑ |
-| thread priority | `pthread_setschedparam` | same POSIX API, but needs `PROCMGR_AID_PRIORITY` for non-root | ☑ |
-| clock | `CLOCK_MONOTONIC` | identical; keep it out of `CLOCK_REALTIME` paths | ☑ |
-| TLS | OpenSSL from the distro | SDP ships OpenSSL 3 (verify the exact package); else build via a qnx-ports style recipe | ☐ |
-| YAML | yaml-cpp from the distro | **no yaml-cpp port in qnx-ports** — either vendor it or add the recipe (upstream contribution) | ☐ |
-| `/proc` | metrics parsing | QNX has `/proc` but a smaller surface; don't rely on it for stats | ☐ |
-| signal handling | `signalfd` | not available; use `sigwait` on a dedicated thread | ☐ |
+| Layer | Changes | Where |
+|---|---|---|
+| Build system | QNX branch for the OpenSSL `ExternalProject` | upstream `CMakeLists.txt` |
+| Dependency | libuv 1.44.3 → 1.53.0 | upstream `3rdparty/libuv` |
+| C source | 2 missing includes | upstream `logger/logger.c`, `moq_transport_client.h` |
+| Toolchain flags | `-D_QNX_SOURCE`, `-liconv` | upstream `CMakeLists.txt` |
 
-## Sequencing
+The application code itself needed **no functional changes**. The QUIC stack,
+HTTP/3, WebTransport and MoQ logic compiled unmodified once the build and the two
+includes were fixed.
 
-1. **Compile only** (`-c`) the C SDK against the SDP headers. This surfaces the
-   include/syscall gaps in hours rather than days.
-2. **Link + run** a UDP echo (upstream has `quic/quic_echo_server.c`) on QEMU.
-3. **TLS handshake** through the C SDK.
-4. **Media push** with the test pattern source.
-5. **Real-time layer**: priority map, affinity, APS partition.
-6. **Evidence**: latency + jitter under netem.
+---
 
-## Risks
+## 2. Build-system issues
 
-| risk | mitigation |
+### 2.1 OpenSSL was silently built with the host compiler
+
+QNX satisfies `UNIX` in CMake, so `OPENSSL_TARGET` was already correct
+(`linux-x86_64` / `linux-aarch64`). The real problem was that `Configure` never
+received `CC`, so OpenSSL fell back to the host `cc` and produced a Linux static
+library. The mismatch only shows up at link time:
+
+```
+undefined reference to `__errno_location'
+undefined reference to `__ctype_b_loc'
+undefined reference to `getcontext'
+undefined reference to `__isoc99_sscanf'
+```
+
+Fix (upstream `32cc938`): pass `CC`/`AR`/`RANLIB` explicitly, and drop what QNX
+does not provide.
+
+### 2.2 qcc does not parse `-MF`
+
+OpenSSL's makefile invokes the compiler with `-MMD -MF <file>.d.tmp`. qcc's option
+parser treats the dependency file name as a second input and fails:
+
+```
+cc: Can't specify -P, -C, -E, -c or -S with -o and have multiple files
+```
+
+Fix: a tiny wrapper (`scripts/qcc-nodep`) strips `-MMD/-MD/-MP/-MF/-MT/-MQ`
+before calling qcc; the QNX branch passes it as `CC`.
+
+### 2.3 Only `build_libs` can be built
+
+`apps/` fails on QNX for the same `-MF` reason plus Linux-only headers. The QNX
+branch therefore builds `build_libs` and installs by copying:
+
+- `${OPENSSL_SRC_DIR}/include` (public headers, e.g. `e_ostime.h`)
+- the generated headers from the build tree (overlay)
+- `libssl.a`, `libcrypto.a`
+
+Missing the first copy produced `openssl/e_ostime.h: No such file` (fixed in
+`bfd9897`).
+
+### 2.4 `link_libraries()` after a target has no effect
+
+`link_libraries(iconv)` appended after `add_executable()` is a no-op — a silent
+failure, not an error. Use `target_link_libraries(moqlivecast PRIVATE iconv)`.
+
+---
+
+## 3. Dependency issues
+
+### 3.1 libuv version
+
+The vendored libuv 1.44.3 targets QNX 7.x and fails on 8.0:
+
+```
+error: 'struct qtime_entry' has no member named 'nsec'
+error: 'struct syspage_entry' has no member named 'new_cpuinfo'
+```
+
+QNX 8 changed the syspage/qtime layout. The fix is upstream PR #4801, which
+landed **after v1.51.0**; v1.52.0 is the first release that contains it.
+Upstream now vendors 1.53.0.
+
+Verify quickly:
+
+```bash
+grep -n "qtime->nsec\|new_cpuinfo" 3rdparty/libuv/src/unix/qnx.c   # expect no output
+```
+
+### 3.2 iconv is a separate library on QNX
+
+QNX libc has no iconv symbols; they live in `libiconv.so` and `iconv.h` ships with
+SDP. The server uses `iconv_open`/`iconv`/`iconv_close` in
+`moqlivecast/utils/stringex.cpp`, so QNX builds must link `-liconv`.
+
+Do **not** try to map `libiconv_open` onto `iconv_open`: QNX's `iconv.h` already
+uses the GNU-style mapping, and re-mapping produces undefined symbols.
+
+### 3.3 OpenSSL must be linked statically
+
+The target ships `libssl.so.3` (3.0.x). Dynamically linking the vendored 3.5.8
+makes the loader resolve the system library at runtime, and the QUIC symbols
+disappear. `no-shared` plus static archives avoids this entirely.
+
+Reliable check (static archives carry no GLIBC version strings, so
+`strings | grep GLIBC` is not a valid test):
+
+```bash
+$QNX_HOST/usr/bin/ntox86_64-nm libcrypto.a | grep -c __errno_location   # 0
+$QNX_HOST/usr/bin/ntox86_64-nm libssl.a    | grep SSL_set_quic_tls_cbs  # T symbol
+```
+
+---
+
+## 4. Source-level issues
+
+### 4.1 `int64_t` is not implicitly available
+
+```
+logger/logger.c:40:8: error: unknown type name 'int64_t'
+```
+
+On Linux the include chain of `<sys/types.h>` happens to pull in `<stdint.h>`;
+QNX does not guarantee it. Fixed by including `<stdint.h>` explicitly.
+
+### 4.2 `sockaddr_in6` is incomplete in C++
+
+```
+uv.h:1239: error: field 'address6' has incomplete type 'sockaddr_in6'
+```
+
+Two independent causes:
+
+1. `libuv`'s `uv.h` relies on `sockaddr_in6` being complete; including
+   `<netinet/in.h>` before `<uv.h>` fixes the C++ translation unit.
+2. QNX gates POSIX declarations behind extension macros. With `-std=c++14`
+   (strict ANSI) the struct stays hidden. Either `-std=gnu++14` or
+   `-D_QNX_SOURCE` fixes it; the port uses `-D_QNX_SOURCE` so the language
+   standard does not change.
+
+This only affects C++: C tolerates the incomplete type in some contexts, which is
+why the C SDK compiled before the C++ tools did.
+
+---
+
+## 5. Runtime / deployment issues
+
+| Issue | Detail | Workaround |
+|---|---|---|
+| No bridged networking on a cloud host | `mkqnximage`'s default QEMU setup wants `brctl` + `dnsmasq` | use `-netdev user` (slirp) with explicit `hostfwd` |
+| QUIC needs a UDP forward | TCP forwards do not carry QUIC | `hostfwd=udp::4433-:4433` plus `hostfwd=tcp::4433-:4433` |
+| `/system`, `/usr` are read-only IFS | cannot install packages or drop libraries at runtime | binaries, config and logs live under `/data` |
+| `sshd` missing `sshd-auth` in the image | sshd exits, so `scp` is unavailable | transfer binaries over HTTP from the host (`curl http://10.0.2.2:8000/...`) |
+| QEMU process dies with the SSH session | stdout is the console | run QEMU inside `tmux` |
+
+---
+
+## 6. What did **not** need changing
+
+Worth stating explicitly, because it is the interesting result:
+
+- no changes to the QUIC state machine, loss recovery, pacing, or congestion control
+- no changes to HTTP/3 or WebTransport framing
+- no changes to the MoQ layer (catalog, tracks, subscribe/publish)
+- no changes to the RTMP / HTTP-FLV servers
+
+io-sock provided enough POSIX surface (epoll, sockets, threads) that the network
+code ran as-is. The port was a build-system and toolchain exercise, not a rewrite.
+
+---
+
+## 7. Verification performed
+
+| Check | Result |
 |---|---|
-| libuv event loop misbehaves on io-sock | fallback: upstream already has a poll-based path; a `posix-poll` backend is 200 lines |
-| OpenSSL missing from SDP | build from source with the `qnx-ports` recipe pattern; budget 2 days |
-| camera driver on RPi5 blocks progress | test pattern source is a first-class deliverable, not a fallback |
-| upstream moves while porting | pinned commit in `scripts/bootstrap.sh`; rebase weekly, not daily |
-| QEMU networking flaky | also keep a `-netdev user` config with explicit hostfwd; document both |
-
-## Checklist
-
-- [ ] `scripts/env.sh` sources cleanly on Linux
-- [ ] `scripts/build.sh` configures with the QNX toolchain
-- [ ] C SDK compiles (`-c`) against SDP headers
-- [ ] UDP echo runs in QEMU
-- [ ] TLS handshake completes
-- [ ] test-pattern push plays in the browser player
-- [ ] priority/affinity layer applied and verified with `pidin`
-- [ ] APS partition configured
-- [ ] latency + jitter measured under netem
-- [ ] demo video recorded
+| `qcc` produces QNX ELF for x86_64 and aarch64 | ✅ `interpreter /usr/lib/ldqnx-64.so.2` |
+| `libmoq_transport_client.a` builds | ✅ |
+| `flv2moqtransport_client` links and pushes | ✅ |
+| full server `moqlivecast` builds | ✅ |
+| server runs in QEMU and listens on 4433 | ✅ `[wt-server] listening on 0.0.0.0:4433` |
+| publish from a host client, play with `moq_player` | ✅ |
+| reproducible from a clean clone | ✅ `bootstrap.sh` + `build.sh` |
