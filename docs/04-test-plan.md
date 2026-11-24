@@ -1,132 +1,155 @@
 # Weak-network test plan
 
-Goal: show that MoQ over QUIC keeps **bounded latency and artifact-free video**
-under packet loss where TCP-based RTMP collapses.
-
-Three properties are claimed. Everything else is reported as a measurement, not a
-promise.
-
-| Property | Definition | Pass condition |
-|---|---|---|
-| **No artifacts** | Every delivered frame decodes correctly; gaps only at frame boundaries | decoder error count = 0 |
-| **Bounded latency** | p99 end-to-end latency does not grow over time | linear regression slope of latency vs time ≈ 0 (< 5 ms/min) |
-| **Connection survives** | the session stays up for the whole run | 10 min at 20 % loss, zero disconnects |
-
-Reported but not promised:
-
-| Metric | Note |
-|---|---|
-| frame delivery ratio | 20 % loss will drop frames; ratio is measured, not asserted |
-| stall count / longest stall | a stall < 2 s is acceptable; > 5 s is a failure |
-| recovery time | time to return to baseline latency after a loss burst |
-
----
+Goal: quantify what MoQ over QUIC does under packet loss, on a realistic
+three-party topology, without relying on "it looked smooth".
 
 ## 1. Topology
 
 ```
-  QNX target (QEMU)                Beijing ECS                 client
-  ┌────────────────┐   loss y%   ┌──────────────┐  loss x%  ┌─────────────┐
-  │ publisher      │ ──────────> │ moqlivecast  │ ────────> │ moq_player  │
-  │ (or server +   │             │ (optional)   │           │ (records    │
-  │  local source) │             └──────────────┘           │  CSV)       │
-  └────────────────┘                                        └─────────────┘
+ (1) QNX target            (2) moqlivecast            (3) player
+     Hong Kong ECS             Beijing ECS               macOS, Beijing
+  ┌──────────────┐   WAN   ┌──────────────────┐  LAN  ┌──────────────┐
+  │ publisher    │────────>│ receive → GOP    │──────>│ moq_player   │
+  │ (QNX/QEMU)   │  loss%  │ cache → serve    │ loss% │ (records CSV)│
+  └──────────────┘         └──────────────────┘       └──────────────┘
+     t0: send                 t1: arrive                 t3: render
+                              t2: re-send
 ```
 
-Two variants are tested:
+Four timestamps give a latency budget:
 
-- **A. QNX as publisher** (port of the client SDK) — measures the QNX data path.
-- **B. QNX as server** (moqlivecast + local source) — measures the server on QNX.
+| Segment | Formula | Measured at | Clock sync needed |
+|---|---|---|---|
+| **A** uplink | `t1 − t0` | HK ↔ BJ | yes |
+| **B** server processing | `t2 − t1` | inside one process | **no** |
+| **C** downlink | `t3 − t2` | BJ ↔ BJ (LAN) | yes, small error |
+| **Total** | `t3 − t0` | end to end | yes (cross-checked visually) |
 
-Variant B is the automotive scenario: the device itself serves the stream.
+Segment B is measured against a single clock, so it carries no synchronisation
+error at all. That is the number that answers "what does the QNX port cost".
 
----
+## 2. Clock discipline
 
-## 2. Loss injection
-
-`netem` only affects egress, so it must be applied on **both** endpoints to get
-symmetric loss.
+All three machines run `chrony` against the same NTP pool.
 
 ```bash
-# on each endpoint
-sudo tc qdisc add dev eth0 root netem loss 20% delay 5ms
-# verify
-tc -s qdisc show dev eth0
-# remove
-sudo tc qdisc del dev eth0 root
+chronyc tracking | grep -E "System time|Last offset"
 ```
 
-Use `scripts/netem-test.sh` to automate apply → run → clear and to record the
-exact windows.
+The measured offset is reported next to the results, so the reader can judge the
+error instead of trusting the numbers blindly. Typical offset on this setup is a
+few milliseconds, against latencies of 100 ms+.
 
-Scenarios:
+Total latency is **cross-checked** with a clock-free method (section 6). If the
+two independent methods agree within 15 ms, the measurement is credible.
 
-| id | loss | delay | duration | purpose |
+## 3. Loss injection
+
+`netem` only shapes egress, so apply it at both ends of the hop under test.
+
+```bash
+# Hong Kong ECS (uplink direction)
+sudo tc qdisc add dev eth0 root netem loss 20%
+# Beijing ECS (uplink direction of the reverse path + downlink)
+sudo tc qdisc add dev eth0 root netem loss 20%
+```
+
+Use `scripts/netem-test.sh` to bracket the window and record timestamps.
+
+| id | uplink loss | downlink loss | duration | purpose |
 |---|---|---|---|---|
-| L0 | 0 % | 5 ms | 5 min | baseline |
-| L5 | 5 % | 5 ms | 5 min | mild |
-| L10 | 10 % | 5 ms | 5 min | moderate |
-| L20 | 20 % | 5 ms | **10 min** | headline scenario |
-| L30 | 30 % | 5 ms | 5 min | stress / breaking point |
-| R5 | 5 % (RTMP) | 5 ms | 5 min | baseline comparison, expected to fail |
+| L0 | 0 % | 0 % | 5 min | baseline |
+| L5 | 5 % | 5 % | 5 min | mild |
+| L10 | 10 % | 10 % | 5 min | moderate |
+| **L20** | **20 %** | **20 %** | **10 min** | headline |
+| L30 | 30 % | 30 % | 5 min | breaking point |
+| R5 | 5 % (RTMP end to end) | 5 % | 5 min | TCP baseline, expected to fail |
 
----
+## 4. Instrumentation
 
-## 3. Instrumentation
+Both sides print one line per **video** frame, gated by an environment variable so
+the logging can be switched off outside test runs.
 
-Both sides emit one CSV line per frame. Clocks must be synchronised (chrony or
-NTP); the analysis tools correct the residual offset with a minimum filter.
-
-Sender (`publisher`):
+Publisher (`flv2moqtransport_client`, `MOQ_CLIENT_DEBUG=1`), right after FLV demux:
 
 ```
-SEND,<seq>,<dts_ms>,<pts_ms>,<size>,<key>,<wall_ms>
+[client-debug] dts=<ms> wall_ms=<unix_ms> app=<a> stream=<s> key=<0|1> size=<n>
 ```
 
-Receiver (`moq_player`):
+Server (`moqlivecast`, `MOQ_STREAM_DEBUG=1`), in the MoQ receive path after the
+frame is depacketised:
 
 ```
-RECV,<seq>,<dts_ms>,<pts_ms>,<size>,<key>,<wall_ms>,<decode_errors>
+[stream-debug] dts=<ms> wall_ms=<unix_ms> app=<a> stream=<s> codec=<H264|H265> key=<0|1> size=<n>
 ```
 
-`seq` is optional; frames are matched on `dts_ms`. `wall_ms` is
-`CLOCK_REALTIME` in milliseconds.
+Notes:
 
----
+- `wall_ms` is `CLOCK_REALTIME` captured **at the call site**, not by the logging
+  macro, so an asynchronous logger cannot shift the timestamp.
+- Frames are matched on `(app, stream, dts)`. The publisher has no sequence number,
+  so **looped input makes dts repeat**; do not loop the source during a run, or
+  treat duplicate matches as ambiguous (the analyser reports them).
+- The client timestamp is taken at demux, so the measured value includes the
+  client's own queueing. This is stated rather than hidden.
 
-## 4. Analysis
+## 5. Promises and metrics
+
+Promised (all testable):
+
+| Promise | Definition | Pass condition |
+|---|---|---|
+| **No artifacts** | every delivered frame decodes correctly | `decode_errors == 0` |
+| **Latency does not accumulate** | delta of one-way latency stays near zero | mean delta ≈ 0, p99 delta < 50 ms |
+| **Connection survives** | session stays up for the whole run | 10 min at 20 % loss, zero disconnects |
+
+Reported, not promised:
+
+| Metric | Why it is not promised |
+|---|---|
+| frame delivery ratio | 20 % loss *will* drop frames |
+| stall count / longest stall | depends on GOP length and player buffering |
+| recovery time | depends on the encoder's next keyframe interval |
+
+## 6. Clock-free cross-check (visual)
+
+The publisher burns `CLOCK_REALTIME` into each frame. The player window shows the
+decoded frame next to a live clock on the same page. A screenshot then contains
+both values, so the total latency can be read directly with no clock sync at all.
+
+This is used to validate the NTP-based numbers, and it is the shot used in the
+demo video.
+
+## 7. Analysis
 
 ```bash
-python3 scripts/analyze_frames.py results/L20/send.csv results/L20/recv.csv \
+python3 scripts/analyze_stream_debug.py client.log server.log \
+    --offset-ms <server_clock_minus_client_clock> \
     --out results/L20/summary.json
 ```
 
-Produces:
+The analyser reports p50/p90/p99/max, the regression slope (does latency grow?),
+delivery ratio, and the number of ambiguous (duplicate-dts) matches. Without
+`--offset-ms` it prints the minimum observed latency as an upper bound on the
+clock offset, which is usually enough to show that the offset is far below the
+latencies being measured.
 
-- one-way latency p50 / p90 / p99 / max, and the regression slope over time
-- frame delivery ratio, longest gap, number of stalls (> 500 ms)
-- decoder error total (must be 0)
+## 8. Results table (fill in)
 
----
+| scenario | A up p50/p99 | B server p50/p99 | C down p50/p99 | total p99 | slope | delivered | longest stall | decode errors |
+|---|---|---|---|---|---|---|---|---|
+| L0 | | | | | | | | |
+| L5 | | | | | | | | |
+| L10 | | | | | | | | |
+| **L20** | | | | | | | | |
+| L30 | | | | | | | | |
+| R5 RTMP | | | | | | | | |
 
-## 5. Results table (fill in)
+## 9. What is deliberately not claimed
 
-| scenario | p50 (ms) | p99 (ms) | slope (ms/min) | delivered | longest stall (ms) | decode errors |
-|---|---|---|---|---|---|---|
-| L0 baseline | | | | | | |
-| L5 | | | | | | |
-| L10 | | | | | | |
-| **L20 (10 min)** | | | | | | |
-| L30 | | | | | | |
-| R5 RTMP | | | | | | |
-
----
-
-## 6. What is deliberately not claimed
-
-- **Zero stalls at 20 % loss.** Losing one packet in five means frames are lost;
-  the claim is that losses cost *frames*, not *latency* and not *image integrity*.
-- **Lower latency than WebRTC.** WebRTC trades content for latency by design.
+- **Zero stalls at 20 % loss** — losing one packet in five loses frames; the claim
+  is that losses cost frames, not latency and not image integrity.
+- **Lower latency than WebRTC** — WebRTC trades content for latency by design;
   MoQ keeps whole objects and lets the application choose the trade-off.
-- **Throughput.** Congestion control shrinks the window under loss; that is
-  expected and is not the metric of interest.
+- **"Smooth playback"** — replaced by decode errors, stalls and delivery ratio,
+  because "smooth" cannot be verified by a reviewer.
