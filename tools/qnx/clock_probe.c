@@ -37,7 +37,19 @@ static long long now_ms(void) {
 }
 
 /* One probe. Returns 0 on success and fills *offset / *rtt (milliseconds). */
+static int probe_attempt(const char* host, int port, long long* offset, long long* rtt);
+
 static int probe_once(const char* host, int port, long long* offset, long long* rtt) {
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (probe_attempt(host, port, offset, rtt) == 0) {
+            return 0;
+        }
+        usleep(50 * 1000);
+    }
+    return -1;
+}
+
+static int probe_attempt(const char* host, int port, long long* offset, long long* rtt) {
     char portstr[16];
     snprintf(portstr, sizeof(portstr), "%d", port);
 
@@ -90,26 +102,35 @@ static int probe_once(const char* host, int port, long long* offset, long long* 
     memset(acc, 0, sizeof(acc));
     memset(body, 0, sizeof(body));
 
+    /* Read until the server closes the connection: with a one-line response the
+     * final EOF arrives within the same round trip, and this avoids depending on
+     * how the peer segments headers and body. */
     while ((n = read(fd, buf, sizeof(buf))) > 0) {
         if (acclen + (size_t)n >= sizeof(acc) - 1) break;
         memcpy(acc + acclen, buf, (size_t)n);
         acclen += (size_t)n;
         acc[acclen] = '\0';
-        const char* sep = strstr(acc, "\r\n\r\n");
-        if (sep) {
-            body_off = (size_t)(sep - acc) + 4;
-            found = 1;
-            break;              /* the body of a one-line response fits already */
-        }
     }
-    if (found) {
-        t4 = now_ms();
+    t4 = now_ms();
+
+    const char* sep = strstr(acc, "\r\n\r\n");
+    if (sep) {
+        body_off = (size_t)(sep - acc) + 4;
+        found = 1;
         for (size_t i = body_off; i < acclen && blen < sizeof(body) - 1; i++) {
             if (acc[i] >= '0' && acc[i] <= '9') body[blen++] = acc[i];
         }
     }
+    if (!found || blen == 0) {
+        /* Keep the failure diagnosable instead of a bare "empty response". */
+        fprintf(stderr, "no time in response (%zu bytes:", acclen);
+        for (size_t i = 0; i < acclen && i < 40; i++) {
+            unsigned char c = (unsigned char)acc[i];
+            fputc((c >= 32 && c < 127) ? c : '.', stderr);
+        }
+        fprintf(stderr, ")\n");
+    }
     close(fd);
-    if (!t4) t4 = now_ms();
 
     if (blen == 0) {
         fprintf(stderr, "empty response\n");
@@ -127,6 +148,11 @@ static int cmp_ll(const void* a, const void* b) {
     return (x > y) - (x < y);
 }
 
+/*
+source ~/qnx800/qnxsdp-env.sh
+qcc -Vgcc_ntox86_64 -O2 -o ~/share/clock_probe tools/qnx/clock_probe.c -lsocket
+file ~/share/clock_probe | grep -o "interpreter [^,]*"
+*/
 int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <host> [port] [samples]\n", argv[0]);
