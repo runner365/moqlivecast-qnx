@@ -60,8 +60,9 @@ def main():
         "offset_ms_max": round(max(offsets), 2),
         "rtt_ms_median": round(statistics.median(delays), 2),
         "interpretation": (
-            "this machine is AHEAD of the reference by %.1f ms" % med if med > 0
-            else "this machine is BEHIND the reference by %.1f ms" % (-med)
+            "reference is AHEAD of this machine by %.1f ms (this machine is BEHIND)" % med
+            if med > 0 else
+            "reference is BEHIND this machine by %.1f ms (this machine is AHEAD)" % (-med)
         ),
     }, indent=2))
     return 0

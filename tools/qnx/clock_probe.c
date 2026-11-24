@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
     printf("samples=%d offset_ms_median=%lld rtt_ms_median=%lld\n",
            ok, offs[ok / 2], rtts[ok / 2]);
     printf("%s\n", offs[ok / 2] > 0
-           ? "this machine is AHEAD of the reference"
-           : "this machine is BEHIND the reference");
+           ? "reference is AHEAD of this machine (this machine is BEHIND)"
+           : "reference is BEHIND this machine (this machine is AHEAD)");
     return 0;
 }
