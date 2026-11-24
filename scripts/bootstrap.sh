@@ -8,9 +8,10 @@ ROOT="$PWD"
 
 UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/runner365/moqlivecast.git}"
 # 固定 commit，保证任何人任何时候克隆到的都是同一份代码。
-# 这是上游合入 QNX 支持（POSIX 头文件 + OpenSSL 交叉编译）之后的提交。
+# 该提交包含：QNX 构建支持（POSIX 头文件 + OpenSSL 交叉编译）、
+# media_source C API、以及 per-frame 调试日志（MOQ_CLIENT_DEBUG）。
 # 升级方式：改这里的 SHA，然后重新跑本脚本与 build.sh 验证。
-UPSTREAM_REF="${UPSTREAM_REF:-bfd9897071d1}"
+UPSTREAM_REF="${UPSTREAM_REF:-22c4773f4f165191269fe147ecefc4dfec311e65}"
 UP_DIR="${UP_DIR:-$ROOT/upstream}"
 
 if [ -d "$UP_DIR/.git" ]; then
