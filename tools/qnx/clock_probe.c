@@ -28,6 +28,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 static long long now_ms(void) {
@@ -154,13 +155,19 @@ qcc -Vgcc_ntox86_64 -O2 -o ~/share/clock_probe tools/qnx/clock_probe.c -lsocket
 file ~/share/clock_probe | grep -o "interpreter [^,]*"
 */
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s <host> [port] [samples]\n", argv[0]);
+    int argi = 1;
+    int do_sync = 0;
+    if (argc > 1 && (strcmp(argv[1], "--sync") == 0 || strcmp(argv[1], "-s") == 0)) {
+        do_sync = 1;
+        argi = 2;
+    }
+    if (argc <= argi) {
+        fprintf(stderr, "usage: %s [--sync] <host> [port] [samples]\n", argv[0]);
         return 2;
     }
-    const char* host = argv[1];
-    int port = (argc > 2) ? atoi(argv[2]) : 9001;
-    int samples = (argc > 3) ? atoi(argv[3]) : 9;
+    const char* host = argv[argi];
+    int port = (argc > argi + 1) ? atoi(argv[argi + 1]) : 9001;
+    int samples = (argc > argi + 2) ? atoi(argv[argi + 2]) : 9;
     if (samples < 1) samples = 1;
 
     long long offs[64], rtts[64];
@@ -189,5 +196,26 @@ int main(int argc, char** argv) {
     printf("%s\n", offs[ok / 2] > 0
            ? "reference is AHEAD of this machine (this machine is BEHIND)"
            : "reference is BEHIND this machine (this machine is AHEAD)");
+
+    if (do_sync) {
+        /* local_new = local + offset, measured to ~1 ms (rtt / 2). */
+#if defined(__APPLE__)
+        fprintf(stderr, "clock sync is not supported on this platform; "
+                        "run the probe on QNX or Linux\n");
+        (void)0;
+#else
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        long long now = (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000L;
+        long long target = now + offs[ok / 2];
+        ts.tv_sec = (time_t)(target / 1000);
+        ts.tv_nsec = (long)((target % 1000) * 1000000L);
+        if (clock_settime(CLOCK_REALTIME, &ts) != 0) {
+            fprintf(stderr, "clock_settime failed: %s (need root?)\n", strerror(errno));
+            return 1;
+        }
+        printf("clock adjusted by %lld ms; re-run to verify\n", offs[ok / 2]);
+#endif
+    }
     return 0;
 }
