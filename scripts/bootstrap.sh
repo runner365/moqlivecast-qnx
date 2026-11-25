@@ -12,8 +12,9 @@ UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/runner365/moqlivecast.git}"
 # media_source C API、per-frame 调试日志（MOQ_CLIENT_DEBUG /
 # MOQ_STREAM_DEBUG），以及 flv2moqtransport_client 的命令行参数、日志文件
 # 和 --only-video / --only-audio 选项（测量时只推视频，排除音频干扰）。
+# 2f207eaa 修复了"发布必须同时有音视频两路"的过严检查，纯视频源现在可用。
 # 升级方式：改这里的 SHA，然后重新跑本脚本与 build.sh 验证。
-UPSTREAM_REF="${UPSTREAM_REF:-6b901229c3c1afb75d69868babf7e944f9ef776b}"
+UPSTREAM_REF="${UPSTREAM_REF:-2f207eaab8d9acb2c3db50e72a61188f9d66fd8d}"
 UP_DIR="${UP_DIR:-$ROOT/upstream}"
 
 if [ -d "$UP_DIR/.git" ]; then

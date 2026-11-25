@@ -193,9 +193,13 @@ int main(int argc, char** argv) {
 
     printf("samples=%d offset_ms_median=%lld rtt_ms_median=%lld\n",
            ok, offs[ok / 2], rtts[ok / 2]);
-    printf("%s\n", offs[ok / 2] > 0
-           ? "reference is AHEAD of this machine (this machine is BEHIND)"
-           : "reference is BEHIND this machine (this machine is AHEAD)");
+    if (offs[ok / 2] > 20) {
+        printf("reference is AHEAD of this machine (this machine is BEHIND)\n");
+    } else if (offs[ok / 2] < -20) {
+        printf("reference is BEHIND this machine (this machine is AHEAD)\n");
+    } else {
+        printf("this machine and the reference agree (within +/-20 ms)\n");
+    }
 
     if (do_sync) {
         /* local_new = local + offset, measured to ~1 ms (rtt / 2). */
