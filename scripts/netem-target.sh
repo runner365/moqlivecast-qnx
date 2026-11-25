@@ -47,7 +47,10 @@ case "$CMD" in
     IFACE="${5:-$DEF_IFACE}"
     need_root
 
-    RULE_DESC="udp dport ${PORT}"
+    # The client shows the QUIC port as the destination; the server shows it as
+    # the source. Install a filter for each direction so the same script works on
+    # both ends without knowing which side it runs on.
+    RULE_DESC="udp sport/dport ${PORT}"
     IP_MATCH=()
     if [ "$PEER" != "any" ] && [ "$PEER" != "-" ]; then
         RULE_DESC="udp -> ${PEER}:${PORT}"
@@ -59,10 +62,17 @@ case "$CMD" in
     # band 1:2 = default (SSH, HTTP); band 1:3 = the shaped flow
     tc qdisc add dev "$IFACE" root handle 1: prio bands 3
     tc qdisc add dev "$IFACE" parent 1:3 handle 30: netem loss "${LOSS}%"
+    # destination port (client -> server)
     tc filter add dev "$IFACE" protocol ip parent 1: prio 1 u32 \
         "${IP_MATCH[@]}" \
         match ip protocol 17 0xff \
         match ip dport "${PORT}" 0xffff \
+        flowid 1:3
+    # source port (server -> client); harmless on the client side
+    tc filter add dev "$IFACE" protocol ip parent 1: prio 2 u32 \
+        "${IP_MATCH[@]}" \
+        match ip protocol 17 0xff \
+        match ip sport "${PORT}" 0xffff \
         flowid 1:3
 
     echo "--- qdisc ---"
